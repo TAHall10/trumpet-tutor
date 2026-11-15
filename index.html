@@ -1,0 +1,144 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Trumpet Tutor</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f1f5f9;color:#172033;margin:0;padding:18px}
+main{max-width:560px;margin:auto}
+h1{text-align:center;color:#175a85}
+section{background:white;border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 2px 8px #0001}
+button,input,select{font-size:17px;padding:12px;border-radius:10px}
+button{background:#176b9c;color:white;border:0;margin:5px;cursor:pointer}
+button:disabled{opacity:.5}
+input[type=range]{width:90%}
+#count{text-align:center;font-size:55px;font-weight:bold;color:#176b9c}
+small{color:#526071}
+</style>
+</head>
+<body>
+<main>
+<h1>🎺 My Trumpet Tutor</h1>
+<section>
+<h2>My Songs</h2>
+<select id="songs"></select>
+<button onclick="start()">▶ Play Song</button>
+<button onclick="stop()">■ Stop</button>
+<div id="count">Ready!</div>
+</section>
+<section>
+<h2>Practice Settings</h2>
+<label>Tempo: <b id="speed">80</b> BPM</label>
+<input id="tempo" type="range" min="40" max="160" value="80" oninput="speed.textContent=this.value">
+<label><input type="checkbox" id="click" checked> Metronome</label>
+<br>
+<label><input type="checkbox" id="repeat"> Repeat song</label>
+</section>
+<section>
+<h2>Add a Song</h2>
+<input id="title" placeholder="Song title" style="width:90%">
+<p><small>Enter written trumpet notes using C4, D4, E4, etc. Each note is followed by its length in beats. Example: E4:1 E4:1 E4:2 R:1</small></p>
+<textarea id="notes" rows="5" style="width:95%;font-size:16px"></textarea>
+<button onclick="saveSong()">Save to Playlist</button>
+</section>
+<section>
+<h2>Scan Sheet Music</h2>
+<input type="file" accept="image/*" capture="environment" id="photo">
+<p><small>Photo capture is available. Automatic note recognition and cropping are not yet implemented in this version. Enter verified notes above.</small></p>
+</section>
+<section>
+<h2>Tuning</h2>
+<button onclick="tune()">Play Written C</button>
+</section>
+</main>
+<script>
+let ctx,playing=false,token=0;
+const key="trumpetTutorSongs";
+let library=JSON.parse(localStorage.getItem(key)||"null")||[
+{title:"Practice C Scale",notes:"C4:1 D4:1 E4:1 F4:1 G4:1 F4:1 E4:1 D4:1 C4:4"}
+];
+function refresh(){
+songs.innerHTML="";
+library.forEach((s,i)=>{
+let o=document.createElement("option");
+o.value=i;o.textContent=s.title;songs.appendChild(o);
+});
+}
+refresh();
+function saveSong(){
+let name=title.value.trim(),score=notes.value.trim();
+if(!name||!score)return alert("Enter a title and notes.");
+try{parse(score)}catch(e){return alert(e.message)}
+library.push({title:name,notes:score});
+localStorage.setItem(key,JSON.stringify(library));
+refresh();songs.value=library.length-1;
+title.value="";notes.value="";
+alert("Song saved!");
+}
+function parse(s){
+return s.trim().split(/\s+/).map(item=>{
+let m=item.match(/^([A-GR])([#b]?)([3-6])?:(\d+(?:\.\d+)?)$/i);
+if(!m)throw Error("Check note: "+item);
+return {note:m[1].toUpperCase(),acc:m[2],oct:+(m[3]||4),beats:+m[4]};
+});
+}
+function audio(){
+if(!ctx)ctx=new (window.AudioContext||window.webkitAudioContext)();
+ctx.resume();return ctx;
+}
+function frequency(n){
+let names={C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+let midi=(n.oct+1)*12+names[n.note]+(n.acc==="#"?1:n.acc==="b"?-1:0)-2;
+return 440*Math.pow(2,(midi-69)/12);
+}
+function tone(f,when,duration,volume=.22){
+let a=audio(),o=a.createOscillator(),g=a.createGain();
+o.type="sawtooth";o.frequency.setValueAtTime(f,when);
+g.gain.setValueAtTime(.0001,when);
+g.gain.linearRampToValueAtTime(volume,when+.035);
+g.gain.setValueAtTime(volume,when+Math.max(.04,duration-.09));
+g.gain.exponentialRampToValueAtTime(.0001,when+duration);
+o.connect(g);g.connect(a.destination);
+o.start(when);o.stop(when+duration+.02);
+}
+function tick(when){
+let a=audio(),o=a.createOscillator(),g=a.createGain();
+o.type="sine";o.frequency.value=950;
+g.gain.setValueAtTime(.13,when);
+g.gain.exponentialRampToValueAtTime(.0001,when+.05);
+o.connect(g);g.connect(a.destination);
+o.start(when);o.stop(when+.06);
+}
+function stop(){playing=false;token++;count.textContent="Ready!";if(ctx){ctx.close();ctx=null}}
+async function start(){
+stop();audio();playing=true;
+let id=++token;
+for(let i=5;i>=1;i--){
+if(id!==token)return;
+count.textContent=i;
+await new Promise(r=>setTimeout(r,1000));
+}
+if(id!==token)return;
+count.textContent="🎺 Playing";
+let song=library[+songs.value],score;
+try{score=parse(song.notes)}catch(e){alert(e.message);stop();return}
+let beat=60/+tempo.value;
+let total=score.reduce((s,n)=>s+n.beats,0);
+let t=audio().currentTime+.12,offset=0;
+for(let n of score){
+if(n.note!=="R")tone(frequency(n),t+offset*beat,n.beats*beat*.92);
+offset+=n.beats;
+}
+if(click.checked){
+for(let i=0;i<Math.ceil(total);i++)tick(t+i*beat);
+}
+await new Promise(r=>setTimeout(r,(total*beat+.2)*1000));
+if(id!==token)return;
+if(repeat.checked)start();else stop();
+}
+function tune(){tone(frequency({note:"C",acc:"",oct:4}),audio().currentTime+.05,2)}
+</script>
+</body>
+</html>
